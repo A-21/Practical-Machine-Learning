@@ -1,9 +1,3 @@
----
-title: "Practical Machine Learning Final Project"
-author: "Wang Qiang"
-date: "2016-07-22"
-output: html_document
----
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
