@@ -1,291 +1,121 @@
-Prediction of execution of an exercise based on measurements of accelerometers
-==============================================================================
+---
+title: "Practical Machine Learning Final Project"
+author: "Wang Qiang"
+date: "2016-07-22"
+output: html_document
+---
 
-Introduction
-------------
-
-Human Activity Recognition (HAR) has been an emergent field of research during
-the recent years. It promises many potential applications such as elderly
-monitoring, life log systems for monitoring energy expenditure and for
-supporting weight-loss programs, etc.
-([source](http://groupware.les.inf.puc-rio.br/har)). In this piece I deal with
-a problem where the goal is to predict "how well" an exercise was carried out.
-The prediction is based on the Weight Lifting Exercises Dataset which contains
-data about six individuals performing an exercise in different ways (correctly
-and in four typically mistaken ways). While exercising four sensors (arm,
-forearm, belt, dumbbell) were active to measure the activity. For this project
-I can use the predictors derived from these measurements (for further details
-see the 
-[original paper](http://groupware.les.inf.puc-rio.br/work.jsf?p1=11201)).
- 
-The project was carried out in R (with a little help of a nice tool of
-[csv-fingerprint](https://github.com/setosa/csv-fingerprint)). In order to
-increase efficiency I use the `doMC` package for parallel computing. 
-
-```{r setoptions, echo=FALSE}
-opts_chunk$set(message=FALSE, warning=FALSE)
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r initialization}
-# Load packages
-library(doMC)
-library(dplyr)
-library(tidyr)
+## Introduction
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+Our goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participant They were asked to perform barbell lifts correctly and incorrectly in 5 different ways to build a predictive model. Referring to the research project HAR published on http://groupware.les.inf.puc-rio.br/har, five ways are exactly categoried by five classes which are specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E). In a word, we will use the data from accelerometers to predict the class with some predictive models. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+
+## Data pre-processing
+
+### Loading data
+We load data from *csv* first. Please note that the work directory may vary according to your environment. In our case, we have a folder called Practical Machine Learning containing all the codes of this course. All the *.rmd* and *.html* files of the final project can be found in the subfolder Final.
+
+```{r,cache=TRUE}
+setwd("E:/Projects/R/Practical Machine Learning/")
+library(lubridate)
+library(forecast)
+training <- read.csv("./Final/pml-training.csv", na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv("./Final/pml-testing.csv", na.strings=c("NA","#DIV/0!",""))
+```
+
+### Cleaning data
+As found in the data csv files, there are some *NA* variables which may distrub our prediction. Thus we remove the predictors which contains any *NA* variables.
+
+```{r,cache=TRUE}
+mvIdx <- colSums(is.na(training)) != 0
+training <- training[, !mvIdx]
+testing <- testing[, !mvIdx]
+```
+
+We also remove the first seven predictors that have few correlations with the predicted classes.
+
+```{r,cache=TRUE}
+trainData <- training[, -c(1:7)]
+testData <- testing[, -c(1:7)]
+```
+
+## Data partition
+We divide the training dataset into trainSet and validSet. Then we will use trainSet to train our predictive model and have a first examination on it with validSet.
+
+```{r,cache=TRUE}
 library(caret)
+set.seed(1026) 
+inTrain <- createDataPartition(trainData$classe, p = 0.7, list = FALSE)
+trainSet <- trainData[inTrain, ]
+validSet <- trainData[-inTrain, ]
+```
+
+## Model Training
+In this section, we present three predictive models listed below:
+Classification Tree(rpart)
+Generalized Boosted Regression Models(gbm)
+Random Forest(rf)
+We will not only compare the accuracy achieved by these three models but also their fitting speed. We will observe that *gbm* reaches the best performance in the aspects of both accuracy and speed.
+
+### Classification Tree(rpart)
+We first train a classification tree with 5-fold cross validation.
+
+```{r,cache=TRUE}
+control <- trainControl(method = "cv", number = 5)
+rpartMod <- train(classe ~ ., data = trainSet, method = "rpart", preProcess=c("center", "scale"),
+                   trControl = control)
+print(rpartMod, digits = 4)
 library(rattle)
-# use parallel computing for training the models
-registerDoMC(cores=4)
+fancyRpartPlot(rpartMod$finalModel)
+predict_rpart <- predict(rpartMod, validSet)
+(conf_rpart <- confusionMatrix(validSet$classe, predict_rpart))
+(predict(rpartMod, testData))
+```
+Notice the classification tree only utilizes four predictors out of 52. The accuracy is no more than 0.5. From the confusion matrix, the out of sample error rate is 0.5242. In conclusion, classification tree can't predict the manner classes very well.
+
+### Generalized Boosted Regression Models(gbm)
+Secondly, we use *gbm* also with 5-fold cross validation to train the data. It takes longer than *rpart* but still acceptable time, let's say, 10 minutes, to finish the training procedure.
+
+```{r,cache=TRUE}
+control <- trainControl(method = "cv", number = 5)
+gbmMod <- train(classe ~ ., data = trainSet, method = "gbm", preProcess=c("center", "scale"),
+                   trControl = control)
+print(gbmMod, digits = 4)
+# predict outcomes using validation set
+predict_gbm <- predict(gbmMod, validSet)
+# Show prediction result
+(conf_gbm <- confusionMatrix(validSet$classe, predict_gbm))
+(predict(gbmMod, testData))
+```
+From the confusion matrix we can note that the *gbm* model finally achieves 0.96 accuracy, which proves its strong ability to predict the manner class very well.
+
+### Random Forest(rf)
+Finally, we have tries to train a random forest model. However, with 52 predictors of over 15 thousand samples, it seems that random forest needs several hours to finish the training procedure. Thus, we only use the first 5 predictors to build our random forest. Luckily, it can also outperform the *rpart* model with over 0.91 accuracy rate.
+
+```{r,cache=TRUE}
+control <- trainControl(method = "cv", number = 5)
+trainSetP <- subset(trainSet, select=-c(classe))
+trainSetC <- trainSet$classe
+rfMod <- train(trainSetC ~ ., data=trainSetP[, c(1:5)], method = "rf", preProcess=c("center", "scale"),
+                   trControl = control, prox = TRUE)
+print(rfMod, digits = 4)
+predict_rf <- predict(rfMod, validSet)
+(conf_rf <- confusionMatrix(validSet$classe, predict_rf))
+(predict(rfMod, testData))
 ```
 
-Exploratory analysis
---------------------
 
-The data which is used for prediction is quite large. It consists 19,622
-observations in 160 variables. The first variables contain general data about
-the measurement (time, user, etc.), the last one is the classe variable ("A" if
-the exercise was performed correctly), and the remaining ones are various
-measurements from the sensors. I split the data into two parts: 60% of the
-observations will be used to train the models and the remaining 40% will serve
-as validation data. The final precision of the model is tested on the provided
-test set.
+## Conclusion
+In this project, we utilize three popular predictive model to train our *HAR* data and compare their accuracy as well as computation speed. We also have trained a random forest model with all the predictors and achieved nearly 0.99 accuracy. Due to the too low compiling speed of this R markdown file, we didn't show them here.
 
-```{r load data}
-# Load in the data
-#------------------
-data <- read.csv("../data/pml-training.csv")
-set.seed(20140820)
-index.train <- createDataPartition(data$classe, p=0.6)[[1]]
-training <- data[index.train, ]        # 60% 
-validation <- data[-index.train, ]     # 40%
-```
+* Regarding the accuracy, random forest model achieves the best.
+* Regarding the speed, classification tree consumes the least time. However, it has poor accuracy performance with more than 20 predictors of training samples.
+* Regarding the above two aspects, generalized boosted regression Model achieves considerable accuracy performance with acceptable training time.
 
-As a first step, we can look at the data using the csv-fingerprint tool. As it
-is only able to deal with relatively small data, I randomly choose 2 percent of
-the observations from the training data and plug them into the tool. The
-resulting picture about the types of data can be seen on the figure below. We
-can see that most of the values are strings (colored by yellow) -- even those
-which are the measurement variables -- and there are also many empty cells
-(colored by dark blue).
-
-```{r check patterns}
-training2 <- sample_frac(training, 0.02) %>% arrange(X)
-write.table(training2, "../data/training2.csv", 
-            row.names=FALSE, col.names=FALSE, sep=",")
-```
-
-![Type pattern in 2% of training data](train2.png)
-Yellow: string, Blue: empty, Purple: decimal, Lightblue: integer
-
-* * *
-
-Based on these observed patterns in the data it is a good idea to reformat the
-measurement variables coded as string to numeric and to try to detect features
-with mostly missing values. 
-
-```{r reformat factor variables}
-# Reformat factor variables as numeric (lot of missing values will be created)
-all.data <- list(training=training,
-                 validation=validation)
-factors <- sapply(all.data$training, is.factor)
-# user name, etc, classe should not change
-factors[c(1:7, length(factors))] <- FALSE 
-ToNum <- function(x) {
-    num <- suppressWarnings(as.numeric(as.character(x)))
-}
-all.data$training[, factors] <- lapply(all.data$training[factors], ToNum)
-all.data$validation[, factors] <- lapply(all.data$validation[factors], ToNum)
-```
-
-We have observations from six individuals. In the table below I looked at some
-basic variables (roll pitch and yaw from four sensors) by the user's to see
-whether there is any pattern to worry about. We could observe that the
-measurements of arm for Jeremy are all zeros (and the measurements of forearm
-for Adelmo are zeros as well). They might have missed one of the sensors when
-exercising. 
-
-```{r missing patterns}
-# Check missing patterns
-Mode <- function(x) {
-    ux <- unique(x)
-    ux[which.max(tabulate(match(x, ux)))]
-}
-basevariables <- "^(roll_|pitch_|yaw_)(bell|arm|forearm|dumbbell)$"
-tb1 <- group_by(training, user_name) %>%
-        summarise_each(funs(mean), matches(basevariables))
-tb2 <- group_by(training, user_name) %>%
-        summarise(Mode(classe))
-inner_join(tb1, tb2, by="user_name")
-```
-
-However, our goal is to predict the type of the exercise based on the
-measurements from the movements, which should later apply to other users as
-well, so it is better not to use the information about the users.
-
-
-```{r ignore non-measurement variables}
-# Ignore variables like timestamp, etc.
-all.data <- lapply(all.data, function(x) { select(x, -(1:7)) } )
-```
-
-On the plot below we can see that more than half of the measurements are mainly
-missing (in more than 97.5 percent of the cases). Although I do not really
-understand the reason why they are missing, it is certainly better not to
-include these variables in the model building.
-
-```{r missing features, fig.height=4}
-# Try to exclude features which are mostly missing (remains 52, plus classe)
-missing.feat <- colMeans(sapply(all.data$training, is.na))
-qplot(missing.feat,
-      xlab = "Proportion of missing observation within features")
-index.nonmissing.feat <- which(missing.feat < 0.975)
-all.nonmiss <- lapply(all.data, function(x) {select(x, index.nonmissing.feat)})
-```
-
-After this simple cleaning process I end up with 52 features whose histograms
-can be seen on the plot below. They all seem to have normal variation with lots
-of zeros in some cases. 
-
-```{r histogram, fig.height=12, fig.width=12, message=FALSE}
-# Plot histograms from variables
-variables.to.plot <- select(all.nonmiss$training, -classe) %>%
-    gather(x, freq)
-ggplot(variables.to.plot, aes(x = freq)) +
-    facet_wrap(~x, scales="free_x") +
-    geom_histogram()
-```
-
-Model building
---------------
-
-First, I build a simple tree model, based only on the base features.
-
-```{r base tree}
-base.data <- all.data$training %>% select(classe, matches(basevariables))
-base.tree <- train(classe ~ .,
-                   data=base.data,
-                   method="rpart") 
-```
-
-The model's performance on the validation set is quite poor. However, it is
-still a large improvement compared to the benchmark (we correctly specified
-the classe in 42 percent of the cases whereas there are 5 classes with
-close to equal prevalence).
-
-```{r base tree performance}
-# performance on validation set
-mean(predict(base.tree, validation) == validation$classe)
-```
-
-For the next step I choose to build a more complicated model on the same set of
-variables, a random forest. This results in a huge improvement, it is able to
-predict more than 93% of the cases correctly.
-
-```{r base forest}
-base.forest <- train(classe ~ .,
-                     data=base.data,
-                     method="rf") 
-# performance on validation set
-mean(predict(base.forest, validation) == validation$classe)
-```
-
-If I run the same model (random forest) on all of my (cleaned) data, I get
-a further improvement in accuracy reaching 99% on the validation set. From the
-confusion matrix we can also tell that the best (balanced) accuracy is reached
-for the classe "A" which denotes the correctly executed exercise. As I suspect
-that to differentiate between correct and incorrect exercise is more important
-than to differentiate between different types of incorrect ones, this is good
-news.
-
-```{r nonmissing forest all}
-# All non-missing, random forest, all
-nonmiss.forest.all <- train(classe ~ .,
-                            data=all.nonmiss$training,
-                            method="rf")
-# performance on validation set
-confusionMatrix(predict(nonmiss.forest.all, validation),
-                validation$classe)
-```
-
-In the following, I build two additional models: (1) a random forest which uses
-only the principal components of the variables which explain 90 percent of the
-total variance and (2) and a generalized boosted model using the `gbm` method
-of the `caret` package.
-
-```{r nonmissing forest 90pca}
-# All non-missing, random forest, pca 90%
-nonmiss.forest.pca <- train(classe ~ .,
-                            data=all.nonmiss$training,
-                            method="rf",
-                            preProcess="pca",
-                            trControl=trainControl(preProcOptions=(thresh=0.9)))
-# performance on validation set
-mean(predict(nonmiss.forest.pca, validation) == validation$classe)
-```
-
-```{r nonmissing boosting}
-# All non-missing, boosting 
-nonmiss.boost <- train(classe ~ .,
-                       data=all.nonmiss$training,
-                       method="gbm")
-# performance on validation set
-mean(predict(nonmiss.boost, validation) == validation$classe)
-```
-
-We can see that the random forest models perform better than the boosted one,
-and that the one which use all of the variables perform better than the
-preprocessed one (measured on the validation set). The random forest without
-principal component preprocessing reaches an accuracy of 99 percent. The other
-two models are slightly worse, but still very good: they predict the classe
-correctly in 96-97 percent of the cases. As ensembling different models
-together usually promises some accuracy gain (if there is at least some
-indepence between the models) I stack together the last three models by using
-the random forest method on the predictions. 
-
-```{r stack together}
-df.predicted <- data.frame(
-    pred.forest=predict(nonmiss.forest.pca, all.nonmiss$training),
-    pred.forest.pca=predict(nonmiss.forest.all, all.nonmiss$training),
-    pred.boost=predict(nonmiss.boost, all.nonmiss$training),
-    classe=all.nonmiss$training$classe
-)
-stacked <- train(classe ~ .,
-                 data=df.predicted,
-                 method="rf")
-# performance on validation set
-df.predicted.validation <- data.frame(
-    pred.forest=predict(nonmiss.forest.pca, all.nonmiss$validation),
-    pred.forest.pca=predict(nonmiss.forest.all, all.nonmiss$validation),
-    pred.boost=predict(nonmiss.boost, all.nonmiss$validation),
-    classe=all.nonmiss$validation$classe
-)
-mean(predict(stacked, df.predicted.validation) == validation$classe)
-```
-
-The performance of the stacked model is an accuracy of about 98 percent. The
-fact that it is slightly below the bigger random forest model might be due to
-the similarity of the models which were stacked together and to the already
-really high accuracy of one of the models. I think that 99 percent accuracy on
-the validation set is quite good so I choose the random forest model without
-prepocessing to be my final model. Its performance of a completely new data
-(like on the test set) might be slightly worse, but since I did not really do
-any fine-tuning based on the validation set results I do not expect this drop
-to matter.
-
-
-Conclusion
-----------
-
-This simple exercise showed us that applying some machine learning techniques
-which are basic today and easy to implement in R could result in a highly
-precise predictive model. As the last step I use my best model (the random
-forest model without preprocessing) to predict the test cases. It yielded a 100
-percent accuracy.
-
-```{r prediction on testing}
-testing <- read.csv("../data/pml-testing.csv")
-# apply the same transformations as before
-testing[, factors] <- lapply(all.data$validation[factors], ToNum)
-testing <- select(testing, -(1:7))
-testing <- select(testing, index.nonmissing.feat)
-answers <- predict(nonmiss.forest.all, testing)
-```
+In conclusion, since this dataset has not only large number of samples but also more than 20 predictors, *rpart* model doesn't work well compared with *gbm* and *rf*. In addition, random forest model needs very long time due to too many predictors which leads to deeper trees. Thus, *gbm* model makes a good balance between accuracy and speed although it's also difficult to interpret. 
